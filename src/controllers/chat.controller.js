@@ -1,5 +1,6 @@
 import pool from "../config/database.config.js";
 import Message from "../models/message.model.js";
+import { enrichMessagesWithUserDetails } from "../utils/userLookup.js";
 
 // Get all chat groups the current user is a member of
 export const getMyGroups = async (req, res) => {
@@ -88,7 +89,9 @@ export const getGroupMessages = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    res.json(messages.reverse()); // Send back in chronological order for UI
+    const enrichedMessages = await enrichMessagesWithUserDetails(messages.reverse());
+
+    res.json(enrichedMessages); // Send back in chronological order for UI
   } catch (error) {
     console.error('[Chat Controller] getGroupMessages error:', error);
     res.status(500).json({ message: 'Internal server error' });

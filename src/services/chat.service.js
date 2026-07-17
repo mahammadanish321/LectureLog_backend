@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import pool from "../config/database.config.js";
 import Message from "../models/message.model.js";
+import { getUserDetails } from "../utils/userLookup.js";
 
 dotenv.config();
 
@@ -96,10 +97,19 @@ export const initChatSockets = (io) => {
 
         const savedMessage = await newMessage.save();
 
-        // Broadcast to the room
-        chatNamespace.to(`group_${groupId}`).emit("receive_message", savedMessage);
+        // Enrich with sender details before broadcasting
+        const senderDetails = await getUserDetails(socket.user.id, socket.user.role);
+        
+        const messageToBroadcast = {
+          ...savedMessage.toObject(),
+          senderName: senderDetails.name,
+          senderAvatar: senderDetails.image_url
+        };
 
-        if (callback) callback({ success: true, message: savedMessage });
+        // Broadcast to the room
+        chatNamespace.to(`group_${groupId}`).emit("receive_message", messageToBroadcast);
+
+        if (callback) callback({ success: true, message: messageToBroadcast });
       } catch (error) {
         console.error("[Chat Socket] Send message error:", error);
         if (callback) callback({ error: "Failed to send message" });
