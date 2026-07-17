@@ -13,7 +13,7 @@ export const getUserDetails = async (id, role) => {
     if (role === 'admin' || role === 'teacher') {
       query = 'SELECT name, image_url FROM users WHERE id = $1';
     } else if (role === 'student') {
-      query = 'SELECT name, image_url FROM students WHERE id = $1';
+      query = 'SELECT name, roll_number, image_url FROM students WHERE id = $1';
     } else {
       return { name: `Unknown ${role}`, image_url: null };
     }
@@ -21,8 +21,12 @@ export const getUserDetails = async (id, role) => {
     const { rows } = await pool.query(query, [id]);
     
     if (rows.length > 0) {
+      let displayName = rows[0].name || `${role} ${id}`;
+      if (role === 'student' && rows[0].roll_number) {
+        displayName += ` (Roll: ${rows[0].roll_number})`;
+      }
       return { 
-        name: rows[0].name || `${role} ${id}`, 
+        name: displayName, 
         image_url: rows[0].image_url || null 
       };
     }
