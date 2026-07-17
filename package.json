@@ -1,6 +1,6 @@
 {
   "name": "Merge_backend",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "It is a backend for the lecture log project. It provides APIs for the frontend to interact with the database and perform various operations related to lectures, users, and logs.",
   "main": "src/index.js",
   "scripts": {
