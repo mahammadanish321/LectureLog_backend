@@ -291,9 +291,11 @@ export const addTeacherAngles = async (req, res) => {
  */
 export const getTeachers = async (req, res) => {
   try {
+    const orgId = req.user.organization_id;
     const { rows: teachers } = await pool.query(
       `SELECT id, name, email, college_id, image_url, created_at, face_embedding, face_embeddings, angle_images, is_face_verified, is_active, status
-        FROM users WHERE role = 'teacher' AND status != 'deleted' ORDER BY created_at DESC`
+        FROM users WHERE role = 'teacher' AND status != 'deleted' AND organization_id = $1 ORDER BY created_at DESC`,
+      [orgId]
     );
     const processedTeachers = teachers.map(t => {
       let angleCount = 0;
