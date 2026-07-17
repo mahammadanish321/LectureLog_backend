@@ -163,6 +163,39 @@ export const createSchedule = async (req, res) => {
         );
       }
 
+      // --- Chatting (Node) Auto-Creation Logic ---
+      const { rows: existingGroup } = await client.query(
+        'SELECT id FROM chat_groups WHERE subject_id = $1 AND year = $2 AND stream = $3 AND organization_id = $4 LIMIT 1',
+        [subject_id, year || '1', stream || 'CSE', org_id]
+      );
+
+      let groupId;
+      if (existingGroup.length > 0) {
+        groupId = existingGroup[0].id;
+      } else {
+        const { rows: subjectData } = await client.query('SELECT name FROM subjects WHERE id = $1', [subject_id]);
+        const groupName = `${subjectData[0].name} - Yr${year || '1'} (${stream || 'CSE'})`;
+        
+        const newGroup = await client.query(
+          'INSERT INTO chat_groups (name, subject_id, year, stream, organization_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+          [groupName, subject_id, year || '1', stream || 'CSE', org_id]
+        );
+        groupId = newGroup.rows[0].id;
+      }
+
+      // Ensure teacher is in the group members
+      const { rowCount: isMember } = await client.query(
+        'SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2',
+        [groupId, final_teacher_id]
+      );
+      if (isMember === 0) {
+        await client.query(
+          'INSERT INTO chat_group_members (group_id, teacher_id) VALUES ($1, $2)',
+          [groupId, final_teacher_id]
+        );
+      }
+      // ------------------------------------------
+
       await client.query('COMMIT');
       res.status(201).json({ message: 'Schedule created successfully', id: scheduleId });
     } catch (err) {
@@ -482,6 +515,40 @@ export const updateSchedule = async (req, res) => {
           [newScheduleId, rId]
         );
       }
+
+      // --- Chatting (Node) Auto-Creation Logic ---
+      const { rows: existingGroup } = await client.query(
+        'SELECT id FROM chat_groups WHERE subject_id = $1 AND year = $2 AND stream = $3 AND organization_id = $4 LIMIT 1',
+        [subject_id, original[0].year, original[0].stream, original[0].organization_id]
+      );
+
+      let groupId;
+      if (existingGroup.length > 0) {
+        groupId = existingGroup[0].id;
+      } else {
+        const { rows: subjectData } = await client.query('SELECT name FROM subjects WHERE id = $1', [subject_id]);
+        const groupName = `${subjectData[0].name} - Yr${original[0].year} (${original[0].stream})`;
+        
+        const newGroup = await client.query(
+          'INSERT INTO chat_groups (name, subject_id, year, stream, organization_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+          [groupName, subject_id, original[0].year, original[0].stream, original[0].organization_id]
+        );
+        groupId = newGroup.rows[0].id;
+      }
+
+      // Ensure teacher is in the group members
+      const { rowCount: isMember } = await client.query(
+        'SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2',
+        [groupId, teacher_id]
+      );
+      if (isMember === 0) {
+        await client.query(
+          'INSERT INTO chat_group_members (group_id, teacher_id) VALUES ($1, $2)',
+          [groupId, teacher_id]
+        );
+      }
+      // ------------------------------------------
+
       await client.query('COMMIT');
       res.json({ message: 'Schedule updated' });
     } catch (err) {

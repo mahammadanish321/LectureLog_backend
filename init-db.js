@@ -508,6 +508,41 @@ const initDb = async () => {
         upload_date DATE NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Chatting (Node) System Tables
+      CREATE TABLE IF NOT EXISTS chat_groups (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE,
+        year INTEGER NOT NULL,
+        stream VARCHAR(100) NOT NULL,
+        organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_group_members (
+        id SERIAL PRIMARY KEY,
+        group_id INTEGER REFERENCES chat_groups(id) ON DELETE CASCADE,
+        teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((teacher_id IS NOT NULL AND student_id IS NULL) OR (teacher_id IS NULL AND student_id IS NOT NULL))
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id SERIAL PRIMARY KEY,
+        group_id INTEGER REFERENCES chat_groups(id) ON DELETE CASCADE,
+        sender_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        sender_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        attachment_url VARCHAR(255),
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((sender_teacher_id IS NOT NULL AND sender_student_id IS NULL) OR (sender_teacher_id IS NULL AND sender_student_id IS NOT NULL))
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_group_id ON chat_messages(group_id);
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
     `);
 
     await client.query('COMMIT');
