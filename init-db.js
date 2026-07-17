@@ -333,13 +333,19 @@ const initDb = async () => {
             ALTER TABLE users ADD CONSTRAINT users_email_org_key UNIQUE (email, organization_id);
           END IF;
 
-          -- Drop old global unique constraint for students email and roll_number
+          -- Drop old global unique constraint for students email, roll_number, and roll_number_college_id
           ALTER TABLE students DROP CONSTRAINT IF EXISTS students_email_key;
           ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_key;
+          ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_college_id_key;
           
           -- Add composite unique constraint for students email and org
           IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'students_email_org_key') THEN
             ALTER TABLE students ADD CONSTRAINT students_email_org_key UNIQUE (email, organization_id);
+          END IF;
+
+          -- Add composite unique constraint for students roll_number, college_id, and org
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'students_roll_college_org_key') THEN
+            ALTER TABLE students ADD CONSTRAINT students_roll_college_org_key UNIQUE (roll_number, college_id, organization_id);
           END IF;
         END $$;
     `);
