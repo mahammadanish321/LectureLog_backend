@@ -167,7 +167,7 @@ export const adminSignupVerify = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  const { email, password, role } = req.body;
+  const { email, password, role, organization_id } = req.body;
   try {
     const { rows } = await pool.query(
       'SELECT u.*, o.name as organization_name, o.slug as organization_slug FROM users u LEFT JOIN organizations o ON u.organization_id = o.id WHERE u.email = $1',
@@ -175,27 +175,44 @@ export const login = async (req, res) => {
     );
     if (rows.length === 0) return res.status(401).json({ message: 'No account found with this institutional email.' });
     
-    const user = rows[0];
-    if (role && user.role !== role) return res.status(401).json({ message: `This account is not registered as a ${role}.` });
+    // Filter matching accounts by password
+    const validUsers = [];
+    for (const user of rows) {
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (isMatch) validUsers.push(user);
+    }
     
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ message: 'The password you entered is incorrect. Please try again.' });
+    if (validUsers.length === 0) return res.status(401).json({ message: 'The password you entered is incorrect. Please try again.' });
     
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role, organization_id: user.organization_id }, process.env.JWT_SECRET || 'secret');
+    let targetUser = null;
+    if (organization_id) {
+      targetUser = validUsers.find(u => u.organization_id === parseInt(organization_id));
+      if (!targetUser) return res.status(401).json({ message: 'Account not found for the selected organization.' });
+    } else {
+      if (validUsers.length > 1) {
+        const orgs = validUsers.map(u => ({ id: u.organization_id, name: u.organization_name, slug: u.organization_slug }));
+        return res.json({ status: 'select_organization', organizations: orgs });
+      }
+      targetUser = validUsers[0];
+    }
+    
+    if (role && targetUser.role !== role) return res.status(401).json({ message: `This account is not registered as a ${role}.` });
+    
+    const token = jwt.sign({ id: targetUser.id, email: targetUser.email, role: targetUser.role, organization_id: targetUser.organization_id }, process.env.JWT_SECRET || 'secret');
     res.json({ 
       token, 
       user: { 
-        id: user.id, 
-        name: user.name, 
-        email: user.email,
-        role: user.role, 
-        college_id: user.college_id,
-        organization: user.organization_name,
-        organization_id: user.organization_id,
-        organization_slug: user.organization_slug,
-        year: user.year,
-        stream: user.stream,
-        image_url: user.image_url
+        id: targetUser.id, 
+        name: targetUser.name, 
+        email: targetUser.email,
+        role: targetUser.role, 
+        college_id: targetUser.college_id,
+        organization: targetUser.organization_name,
+        organization_id: targetUser.organization_id,
+        organization_slug: targetUser.organization_slug,
+        year: targetUser.year,
+        stream: targetUser.stream,
+        image_url: targetUser.image_url
       } 
     });
   } catch (err) {
@@ -270,7 +287,7 @@ export const adminLogin = async (req, res) => {
 };
 
 export const studentLogin = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, organization_id } = req.body;
   try {
     const { rows } = await pool.query(
       'SELECT s.*, o.name as organization_name, o.slug as organization_slug FROM students s LEFT JOIN organizations o ON s.organization_id = o.id WHERE s.email = $1',
@@ -278,24 +295,42 @@ export const studentLogin = async (req, res) => {
     );
     if (rows.length === 0) return res.status(401).json({ message: 'No student record found for this institutional email.' });
     
-    const isMatch = await bcrypt.compare(password, rows[0].password);
-    if (!isMatch) return res.status(401).json({ message: 'Incorrect password. Please verify and try again.' });
+    // Filter matching accounts by password
+    const validUsers = [];
+    for (const user of rows) {
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (isMatch) validUsers.push(user);
+    }
     
-    const token = jwt.sign({ id: rows[0].id, role: 'student', organization_id: rows[0].organization_id }, process.env.JWT_SECRET || 'secret');
+    if (validUsers.length === 0) return res.status(401).json({ message: 'Incorrect password. Please verify and try again.' });
+    
+    let targetUser = null;
+    if (organization_id) {
+      targetUser = validUsers.find(u => u.organization_id === parseInt(organization_id));
+      if (!targetUser) return res.status(401).json({ message: 'Account not found for the selected organization.' });
+    } else {
+      if (validUsers.length > 1) {
+        const orgs = validUsers.map(u => ({ id: u.organization_id, name: u.organization_name, slug: u.organization_slug }));
+        return res.json({ status: 'select_organization', organizations: orgs });
+      }
+      targetUser = validUsers[0];
+    }
+    
+    const token = jwt.sign({ id: targetUser.id, role: 'student', organization_id: targetUser.organization_id }, process.env.JWT_SECRET || 'secret');
     res.json({ 
       token, 
       user: { 
-        id: rows[0].id, 
-        name: rows[0].name, 
-        email: rows[0].email,
+        id: targetUser.id, 
+        name: targetUser.name, 
+        email: targetUser.email,
         role: 'student', 
-        college_id: rows[0].college_id,
-        organization: rows[0].organization_name,
-        organization_id: rows[0].organization_id,
-        organization_slug: rows[0].organization_slug,
-        year: rows[0].year,
-        stream: rows[0].stream,
-        image_url: rows[0].image_url
+        college_id: targetUser.college_id,
+        organization: targetUser.organization_name,
+        organization_id: targetUser.organization_id,
+        organization_slug: targetUser.organization_slug,
+        year: targetUser.year,
+        stream: targetUser.stream,
+        image_url: targetUser.image_url
       } 
     });
   } catch (err) {
