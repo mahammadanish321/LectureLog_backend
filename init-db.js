@@ -191,6 +191,14 @@ const initDb = async () => {
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'classrooms_name_org_key') THEN
           ALTER TABLE classrooms ADD CONSTRAINT classrooms_name_org_key UNIQUE (name, organization_id);
         END IF;
+
+        -- Drop old global unique constraint for cameras if it exists
+        ALTER TABLE cameras DROP CONSTRAINT IF EXISTS cameras_camera_url_key;
+
+        -- Add new composite unique constraint for cameras
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cameras_camera_url_org_key') THEN
+          ALTER TABLE cameras ADD CONSTRAINT cameras_camera_url_org_key UNIQUE (camera_url, organization_id);
+        END IF;
       END $$;
     `);
 
@@ -404,7 +412,7 @@ const initDb = async () => {
     await client.query(`
       INSERT INTO cameras (classroom_id, camera_url, camera_name, camera_type, camera_quality, organization_id)
       SELECT id, camera_url, camera_name, camera_type, camera_quality, organization_id FROM classrooms
-      ON CONFLICT (camera_url) DO NOTHING;
+      ON CONFLICT (camera_url, organization_id) DO NOTHING;
     `);
 
     // Migrate existing classroom assignments from schedules table
