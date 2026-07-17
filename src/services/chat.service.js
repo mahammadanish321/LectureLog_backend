@@ -30,15 +30,24 @@ export const initChatSockets = (io) => {
     // Join a specific group room
     socket.on("join_group", async (groupId, callback) => {
       try {
-        // Optional: Verify in PostgreSQL if user is actually a member of this group
+        // Verify in PostgreSQL if user is allowed in this group
         let isMember = false;
         
         if (socket.user.role === 'admin') {
           isMember = true; // Admins can join any group
-        } else {
-          const userCol = socket.user.role === 'student' ? 'student_id' : 'teacher_id';
+        } else if (socket.user.role === 'student') {
+          // Verify group matches student's year and stream
           const { rowCount } = await pool.query(
-            `SELECT 1 FROM chat_group_members WHERE group_id = $1 AND ${userCol} = $2`,
+            `SELECT 1 FROM chat_groups cg 
+             JOIN students s ON cg.year = s.year AND cg.stream = s.stream AND cg.organization_id = s.organization_id
+             WHERE cg.id = $1 AND s.id = $2`,
+            [groupId, socket.user.id]
+          );
+          isMember = rowCount > 0;
+        } else {
+          // Verify teacher is explicitly in group_members
+          const { rowCount } = await pool.query(
+            `SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2`,
             [groupId, socket.user.id]
           );
           isMember = rowCount > 0;

@@ -20,13 +20,23 @@ export const getMyGroups = async (req, res) => {
         ORDER BY cg.created_at DESC
       `;
       params = [orgId];
+    } else if (role === 'student') {
+      // Students see groups matching their year, stream, and org
+      query = `
+        SELECT cg.id, cg.name, cg.subject_id, cg.year, cg.stream, cg.created_at
+        FROM chat_groups cg
+        JOIN students s ON cg.year = s.year AND cg.stream = s.stream AND cg.organization_id = s.organization_id
+        WHERE s.id = $1 AND cg.organization_id = $2
+        ORDER BY cg.created_at DESC
+      `;
+      params = [userId, orgId];
     } else {
-      const userCol = role === 'student' ? 'student_id' : 'teacher_id';
+      // Teachers only see groups they are explicitly added to
       query = `
         SELECT cg.id, cg.name, cg.subject_id, cg.year, cg.stream, cg.created_at
         FROM chat_groups cg
         JOIN chat_group_members cgm ON cg.id = cgm.group_id
-        WHERE cgm.${userCol} = $1 AND cg.organization_id = $2
+        WHERE cgm.teacher_id = $1 AND cg.organization_id = $2
         ORDER BY cg.created_at DESC
       `;
       params = [userId, orgId];
@@ -48,15 +58,28 @@ export const getGroupMessages = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Verify membership (Optional but recommended for security)
+    // Verify membership
     if (req.user.role !== 'admin') {
-      const userCol = req.user.role === 'student' ? 'student_id' : 'teacher_id';
-      const { rowCount } = await pool.query(
-        `SELECT 1 FROM chat_group_members WHERE group_id = $1 AND ${userCol} = $2`,
-        [groupId, req.user.id]
-      );
-      if (rowCount === 0) {
-        return res.status(403).json({ message: 'Access denied to this group' });
+      if (req.user.role === 'student') {
+        // Verify group matches student's year and stream
+        const { rowCount } = await pool.query(
+          `SELECT 1 FROM chat_groups cg 
+           JOIN students s ON cg.year = s.year AND cg.stream = s.stream AND cg.organization_id = s.organization_id
+           WHERE cg.id = $1 AND s.id = $2`,
+          [groupId, req.user.id]
+        );
+        if (rowCount === 0) {
+          return res.status(403).json({ message: 'Access denied: Group does not match your year and stream' });
+        }
+      } else {
+        // Verify teacher is explicitly in group_members
+        const { rowCount } = await pool.query(
+          `SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2`,
+          [groupId, req.user.id]
+        );
+        if (rowCount === 0) {
+          return res.status(403).json({ message: 'Access denied to this group' });
+        }
       }
     }
 
