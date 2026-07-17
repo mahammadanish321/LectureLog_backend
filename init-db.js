@@ -24,7 +24,7 @@ const initDb = async () => {
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL,
         password VARCHAR(255),
         organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
         college_id VARCHAR(100),
@@ -34,7 +34,8 @@ const initDb = async () => {
         status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'deleted')),
         otp_code VARCHAR(6),
         otp_expiry TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (email, organization_id)
       )
     `);
 
@@ -80,9 +81,9 @@ const initDb = async () => {
       CREATE TABLE IF NOT EXISTS students (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL,
         password VARCHAR(255),
-        roll_number VARCHAR(50) UNIQUE NOT NULL,
+        roll_number VARCHAR(50) NOT NULL,
         organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
         college_id VARCHAR(100) NOT NULL,
         year INTEGER,
@@ -93,7 +94,8 @@ const initDb = async () => {
         otp_expiry TIMESTAMPTZ,
         status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE (roll_number, organization_id)
+        UNIQUE (roll_number, organization_id),
+        UNIQUE (email, organization_id)
       )
     `);
 
@@ -317,6 +319,29 @@ const initDb = async () => {
           ADD CONSTRAINT timetable_week_entries_action_check
           CHECK (action IN ('active', 'cancelled', 'deleted'));
       END $$;
+    `);
+
+    // Modify global unique constraint on users and students emails
+    await client.query(`
+        DO $$
+        BEGIN
+          -- Drop old global unique constraint for users email
+          ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+          
+          -- Add composite unique constraint for users email and org
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_email_org_key') THEN
+            ALTER TABLE users ADD CONSTRAINT users_email_org_key UNIQUE (email, organization_id);
+          END IF;
+
+          -- Drop old global unique constraint for students email and roll_number
+          ALTER TABLE students DROP CONSTRAINT IF EXISTS students_email_key;
+          ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_key;
+          
+          -- Add composite unique constraint for students email and org
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'students_email_org_key') THEN
+            ALTER TABLE students ADD CONSTRAINT students_email_org_key UNIQUE (email, organization_id);
+          END IF;
+        END $$;
     `);
 
     // Ensure the stream column exists in schedules if the table was already created
