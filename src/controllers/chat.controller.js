@@ -157,9 +157,8 @@ export const syncLegacyNodes = async (req, res) => {
         s.organization_id, 
         s.teacher_id,
         sub.name as subject_name
-      FROM schedule s
+      FROM schedules s
       JOIN subjects sub ON s.subject_id = sub.id
-      WHERE s.status = 'regular' OR s.status = 'custom'
     `);
 
     let groupsCreated = 0;
