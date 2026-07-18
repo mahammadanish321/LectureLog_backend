@@ -149,7 +149,31 @@ export const registerTeacher = async (req, res) => {
     if (imageFile && fs.existsSync(imageFile.path)) fs.unlinkSync(imageFile.path);
     
     if (err.code === '23505') {
-      return res.status(409).json({ message: 'Email already exists' });
+      // Only report an email conflict after confirming that this exact role
+      // already exists in the authenticated user's organization.  A 23505 may
+      // be caused by another unique field, and records in other organizations
+      // must never influence this message.
+      try {
+        const existing = await pool.query(
+          'SELECT id FROM users WHERE email = $1 AND organization_id = $2 AND role = $3',
+          [email, organization_id, 'teacher']
+        );
+        
+        if (existing.rows.length > 0) {
+          return res.status(409).json({ 
+            message: `A teacher with email "${email}" is already registered in this organization.`,
+            conflictingRole: 'teacher'
+          });
+        }
+      } catch (queryErr) {
+        console.error('Error querying existing user:', queryErr);
+      }
+      
+      // Preserve the database error category without incorrectly claiming an
+      // email/role conflict that was not found in this organization.
+      return res.status(409).json({ 
+        message: 'A record with one of these registration details already exists in this organization. Please review the submitted details and try again.'
+      });
     }
     
     // TEMPORARY: Return full error for debugging cloud-side

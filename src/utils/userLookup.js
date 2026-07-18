@@ -60,6 +60,14 @@ export const enrichMessagesWithUserDetails = async (messages) => {
     msgObj.senderName = userCache[cacheKey].name;
     msgObj.senderAvatar = userCache[cacheKey].image_url;
     
+    if (msgObj.replyTo && msgObj.replyTo.senderId) {
+      const replyCacheKey = `${msgObj.replyTo.senderType}_${msgObj.replyTo.senderId}`;
+      if (!userCache[replyCacheKey]) {
+        userCache[replyCacheKey] = await getUserDetails(msgObj.replyTo.senderId, msgObj.replyTo.senderType);
+      }
+      msgObj.replyTo.senderName = userCache[replyCacheKey].name;
+    }
+    
     enrichedMessages.push(msgObj);
   }
   

@@ -19,9 +19,21 @@ const messageSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  attachmentUrl: {
-    type: String,
+  attachmentUrls: {
+    type: [String],
+    default: [],
+  },
+  replyTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Message',
     default: null,
+  },
+  seenBy: {
+    type: [{
+      userId: { type: Number, required: true },
+      role: { type: String, required: true }
+    }],
+    default: []
   },
   isDeleted: {
     type: Boolean,

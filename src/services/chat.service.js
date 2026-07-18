@@ -63,6 +63,11 @@ export const initChatSockets = (io) => {
         socket.join(roomName);
         console.log(`[Chat Socket] User ${socket.user.id} joined room ${roomName}`);
         
+        // Broadcast presence
+        const socketsInRoom = await chatNamespace.in(roomName).fetchSockets();
+        const onlineClassmates = Array.from(new Set(socketsInRoom.map(s => s.user.id)));
+        chatNamespace.to(roomName).emit('presence_update', { onlineClassmates, groupId });
+
         if (callback) callback({ success: true, room: roomName });
       } catch (error) {
         console.error("[Chat Socket] Join group error:", error);
@@ -71,15 +76,52 @@ export const initChatSockets = (io) => {
     });
 
     // Leave a specific group room
-    socket.on("leave_group", (groupId) => {
+    socket.on("leave_group", async (groupId) => {
       const roomName = `group_${groupId}`;
       socket.leave(roomName);
+      
+      const socketsInRoom = await chatNamespace.in(roomName).fetchSockets();
+      const onlineClassmates = Array.from(new Set(socketsInRoom.map(s => s.user.id)));
+      chatNamespace.to(roomName).emit('presence_update', { onlineClassmates, groupId });
+    });
+
+    // Typing Indicators
+    socket.on("typing", ({ groupId, name }) => {
+      socket.to(`group_${groupId}`).emit("user_typing", { groupId, userId: socket.user.id, name });
+    });
+
+    socket.on("stop_typing", ({ groupId }) => {
+      socket.to(`group_${groupId}`).emit("user_stop_typing", { groupId, userId: socket.user.id });
+    });
+
+    // Read Receipts
+    socket.on("mark_seen", async ({ messageId, groupId }) => {
+      try {
+        const updatedMsg = await Message.findByIdAndUpdate(
+          messageId,
+          {
+            $addToSet: {
+              seenBy: { userId: socket.user.id, role: socket.user.role }
+            }
+          },
+          { new: true }
+        );
+        if (updatedMsg) {
+          chatNamespace.to(`group_${groupId}`).emit("message_seen", {
+            messageId,
+            groupId,
+            seenBy: updatedMsg.seenBy
+          });
+        }
+      } catch (err) {
+        console.error("mark_seen error:", err);
+      }
     });
 
     // Handle incoming messages
     socket.on("send_message", async (data, callback) => {
       try {
-        const { groupId, content, attachmentUrl } = data;
+        const { groupId, content, attachmentUrls, replyTo } = data;
 
         if (!groupId || !content) {
           if (callback) callback({ error: "Missing groupId or content" });
@@ -92,10 +134,14 @@ export const initChatSockets = (io) => {
           senderId: socket.user.id,
           senderType: socket.user.role,
           content,
-          attachmentUrl
+          attachmentUrls: attachmentUrls || [],
+          replyTo: replyTo || null
         });
 
-        const savedMessage = await newMessage.save();
+        await newMessage.save();
+        
+        // Fetch it back with populated replyTo
+        const savedMessage = await Message.findById(newMessage._id).populate('replyTo', 'content senderId senderType attachmentUrls isDeleted');
 
         // Enrich with sender details before broadcasting
         const senderDetails = await getUserDetails(socket.user.id, socket.user.role);
@@ -105,6 +151,12 @@ export const initChatSockets = (io) => {
           senderName: senderDetails.name,
           senderAvatar: senderDetails.image_url
         };
+        
+        // Enrich the replied-to user's name if applicable
+        if (messageToBroadcast.replyTo && messageToBroadcast.replyTo.senderId) {
+          const replyDetails = await getUserDetails(messageToBroadcast.replyTo.senderId, messageToBroadcast.replyTo.senderType);
+          messageToBroadcast.replyTo.senderName = replyDetails.name;
+        }
 
         // Broadcast to the room
         chatNamespace.to(`group_${groupId}`).emit("receive_message", messageToBroadcast);
@@ -114,6 +166,20 @@ export const initChatSockets = (io) => {
         console.error("[Chat Socket] Send message error:", error);
         if (callback) callback({ error: "Failed to send message" });
       }
+    });
+
+    socket.on("disconnecting", async () => {
+      const roomsToUpdate = Array.from(socket.rooms).filter(r => r.startsWith("group_"));
+      
+      roomsToUpdate.forEach(async (room) => {
+        const socketsInRoom = await chatNamespace.in(room).fetchSockets();
+        const onlineClassmates = Array.from(new Set(
+          socketsInRoom
+            .filter(s => s.id !== socket.id)
+            .map(s => s.user.id)
+        ));
+        chatNamespace.to(room).emit('presence_update', { onlineClassmates, groupId: room.split('_')[1] });
+      });
     });
 
     socket.on("disconnect", () => {

@@ -35,7 +35,7 @@ const initDb = async () => {
         otp_code VARCHAR(6),
         otp_expiry TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE (email, organization_id)
+        UNIQUE (email, organization_id, role)
       )
     `);
 
@@ -143,6 +143,17 @@ const initDb = async () => {
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='subjects' AND column_name='organization_id') THEN
           ALTER TABLE subjects ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE;
+        END IF;
+        
+        -- Fix users table constraint to include role
+        -- Drop ALL variations of the old email constraint
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_org_key CASCADE;
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_organization_id_key CASCADE;
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_organization_id_role_key CASCADE;
+        
+        -- Add the correct constraint with role
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_email_org_role_key') THEN
+          ALTER TABLE users ADD CONSTRAINT users_email_org_role_key UNIQUE (email, organization_id, role);
         END IF;
         
         -- Drop old global unique constraint if it exists
@@ -329,16 +340,24 @@ const initDb = async () => {
       END $$;
     `);
 
-    // Modify global unique constraint on users and students emails
+    // Scope email uniqueness correctly for multi-tenant users and students.
+    // A user may hold more than one role in the same organization, so the
+    // users constraint must include role.  Do not recreate users_email_org_key
+    // here: that older constraint blocks an admin from also being a teacher.
     await client.query(`
         DO $$
         BEGIN
           -- Drop old global unique constraint for users email
           ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
           
-          -- Add composite unique constraint for users email and org
-          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_email_org_key') THEN
-            ALTER TABLE users ADD CONSTRAINT users_email_org_key UNIQUE (email, organization_id);
+          -- Remove every legacy two-column email/org constraint.  Earlier
+          -- versions created these under more than one name.
+          ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_org_key;
+          ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_organization_id_key;
+
+          -- Allow the same email in the same organization when the role differs.
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_email_org_role_key') THEN
+            ALTER TABLE users ADD CONSTRAINT users_email_org_role_key UNIQUE (email, organization_id, role);
           END IF;
 
           -- Drop old global unique constraint for students email, roll_number, and roll_number_college_id
