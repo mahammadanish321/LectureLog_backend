@@ -24,7 +24,7 @@ const initDb = async () => {
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL,
         password VARCHAR(255),
         organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
         college_id VARCHAR(100),
@@ -34,7 +34,8 @@ const initDb = async () => {
         status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'deleted')),
         otp_code VARCHAR(6),
         otp_expiry TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (email, organization_id, role)
       )
     `);
 
@@ -80,9 +81,9 @@ const initDb = async () => {
       CREATE TABLE IF NOT EXISTS students (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL,
         password VARCHAR(255),
-        roll_number VARCHAR(50) UNIQUE NOT NULL,
+        roll_number VARCHAR(50) NOT NULL,
         organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
         college_id VARCHAR(100) NOT NULL,
         year INTEGER,
@@ -93,7 +94,8 @@ const initDb = async () => {
         otp_expiry TIMESTAMPTZ,
         status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE (roll_number, organization_id)
+        UNIQUE (roll_number, organization_id),
+        UNIQUE (email, organization_id)
       )
     `);
 
@@ -143,6 +145,17 @@ const initDb = async () => {
           ALTER TABLE subjects ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE;
         END IF;
         
+        -- Fix users table constraint to include role
+        -- Drop ALL variations of the old email constraint
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_org_key CASCADE;
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_organization_id_key CASCADE;
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_organization_id_role_key CASCADE;
+        
+        -- Add the correct constraint with role
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_email_org_role_key') THEN
+          ALTER TABLE users ADD CONSTRAINT users_email_org_role_key UNIQUE (email, organization_id, role);
+        END IF;
+        
         -- Drop old global unique constraint if it exists
         ALTER TABLE subjects DROP CONSTRAINT IF EXISTS subjects_name_key;
         
@@ -188,6 +201,14 @@ const initDb = async () => {
         -- Add new composite unique constraint
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'classrooms_name_org_key') THEN
           ALTER TABLE classrooms ADD CONSTRAINT classrooms_name_org_key UNIQUE (name, organization_id);
+        END IF;
+
+        -- Drop old global unique constraint for cameras if it exists
+        ALTER TABLE cameras DROP CONSTRAINT IF EXISTS cameras_camera_url_key;
+
+        -- Add new composite unique constraint for cameras
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cameras_camera_url_org_key') THEN
+          ALTER TABLE cameras ADD CONSTRAINT cameras_camera_url_org_key UNIQUE (camera_url, organization_id);
         END IF;
       END $$;
     `);
@@ -319,6 +340,43 @@ const initDb = async () => {
       END $$;
     `);
 
+    // Scope email uniqueness correctly for multi-tenant users and students.
+    // A user may hold more than one role in the same organization, so the
+    // users constraint must include role.  Do not recreate users_email_org_key
+    // here: that older constraint blocks an admin from also being a teacher.
+    await client.query(`
+        DO $$
+        BEGIN
+          -- Drop old global unique constraint for users email
+          ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+          
+          -- Remove every legacy two-column email/org constraint.  Earlier
+          -- versions created these under more than one name.
+          ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_org_key;
+          ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_organization_id_key;
+
+          -- Allow the same email in the same organization when the role differs.
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_email_org_role_key') THEN
+            ALTER TABLE users ADD CONSTRAINT users_email_org_role_key UNIQUE (email, organization_id, role);
+          END IF;
+
+          -- Drop old global unique constraint for students email, roll_number, and roll_number_college_id
+          ALTER TABLE students DROP CONSTRAINT IF EXISTS students_email_key;
+          ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_key;
+          ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_college_id_key;
+          
+          -- Add composite unique constraint for students email and org
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'students_email_org_key') THEN
+            ALTER TABLE students ADD CONSTRAINT students_email_org_key UNIQUE (email, organization_id);
+          END IF;
+
+          -- Add composite unique constraint for students roll_number, college_id, and org
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'students_roll_college_org_key') THEN
+            ALTER TABLE students ADD CONSTRAINT students_roll_college_org_key UNIQUE (roll_number, college_id, organization_id);
+          END IF;
+        END $$;
+    `);
+
     // Ensure the stream column exists in schedules if the table was already created
     await client.query(`
       ALTER TABLE schedules ADD COLUMN IF NOT EXISTS stream VARCHAR(50) NOT NULL DEFAULT 'CSE';
@@ -373,7 +431,7 @@ const initDb = async () => {
     await client.query(`
       INSERT INTO cameras (classroom_id, camera_url, camera_name, camera_type, camera_quality, organization_id)
       SELECT id, camera_url, camera_name, camera_type, camera_quality, organization_id FROM classrooms
-      ON CONFLICT (camera_url) DO NOTHING;
+      ON CONFLICT (camera_url, organization_id) DO NOTHING;
     `);
 
     // Migrate existing classroom assignments from schedules table
@@ -508,6 +566,41 @@ const initDb = async () => {
         upload_date DATE NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Chatting (Node) System Tables
+      CREATE TABLE IF NOT EXISTS chat_groups (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE,
+        year INTEGER NOT NULL,
+        stream VARCHAR(100) NOT NULL,
+        organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_group_members (
+        id SERIAL PRIMARY KEY,
+        group_id INTEGER REFERENCES chat_groups(id) ON DELETE CASCADE,
+        teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((teacher_id IS NOT NULL AND student_id IS NULL) OR (teacher_id IS NULL AND student_id IS NOT NULL))
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id SERIAL PRIMARY KEY,
+        group_id INTEGER REFERENCES chat_groups(id) ON DELETE CASCADE,
+        sender_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        sender_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        attachment_url VARCHAR(255),
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((sender_teacher_id IS NOT NULL AND sender_student_id IS NULL) OR (sender_teacher_id IS NULL AND sender_student_id IS NOT NULL))
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_group_id ON chat_messages(group_id);
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
     `);
 
     await client.query('COMMIT');

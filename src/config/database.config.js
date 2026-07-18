@@ -1,5 +1,6 @@
 import pg from "pg";
 import dotenv from "dotenv";
+import mongoose from "mongoose";
 
 dotenv.config();
 const { Pool } = pg;
@@ -50,6 +51,14 @@ export const testDatabaseConnection = async () => {
   const client = await pool.connect();
   try {
     await client.query("SELECT 1");
+
+    // Connect to MongoDB
+    if (process.env.MONGODB_URI) {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log("✅ [Database] Connected to MongoDB.");
+    } else {
+      console.warn("⚠️ [Database] MONGODB_URI not found. MongoDB features will be disabled.");
+    }
     // Ensure notifications table exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS notifications (
