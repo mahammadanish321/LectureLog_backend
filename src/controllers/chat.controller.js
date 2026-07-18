@@ -60,9 +60,17 @@ export const getGroupMessages = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Verify membership
-    if (req.user.role !== 'admin') {
-      if (req.user.role === 'student') {
+      // Verify membership and organization
+      if (req.user.role === 'admin') {
+        // Admin: verify group belongs to their organization
+        const { rowCount } = await pool.query(
+          'SELECT 1 FROM chat_groups WHERE id = $1 AND organization_id = $2',
+          [groupId, req.user.organization_id]
+        );
+        if (rowCount === 0) {
+          return res.status(403).json({ message: 'Access denied: Group belongs to another organization' });
+        }
+      } else if (req.user.role === 'student') {
         // Verify group matches student's year and stream
         const { rowCount } = await pool.query(
           `SELECT 1 FROM chat_groups cg 
@@ -76,14 +84,15 @@ export const getGroupMessages = async (req, res) => {
       } else {
         // Verify teacher is explicitly in group_members
         const { rowCount } = await pool.query(
-          `SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2`,
-          [groupId, req.user.id]
+          `SELECT 1 FROM chat_group_members cgm
+           JOIN chat_groups cg ON cgm.group_id = cg.id
+           WHERE cgm.group_id = $1 AND cgm.teacher_id = $2 AND cg.organization_id = $3`,
+          [groupId, req.user.id, req.user.organization_id]
         );
         if (rowCount === 0) {
           return res.status(403).json({ message: 'Access denied to this group' });
         }
       }
-    }
 
     const messages = await Message.find({ groupId })
       .sort({ createdAt: -1 }) // Newest first
@@ -114,10 +123,13 @@ export const getGroupStats = async (req, res) => {
     if (groupRes.rowCount === 0) {
       return res.status(404).json({ message: 'Group not found' });
     }
-    
-    const { year, stream, organization_id } = groupRes.rows[0];
-    
-    // Count students in that year/stream/org
+        const { year, stream, organization_id } = groupRes.rows[0];
+      
+      if (organization_id !== req.user.organization_id) {
+        return res.status(403).json({ message: 'Access denied: Group belongs to another organization' });
+      }
+      
+      // Count students in that year/stream/org
     const studentsRes = await pool.query(
       'SELECT count(*) FROM students WHERE year = $1 AND stream = $2 AND organization_id = $3',
       [year, stream, organization_id]

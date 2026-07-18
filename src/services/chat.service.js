@@ -35,7 +35,12 @@ export const initChatSockets = (io) => {
         let isMember = false;
         
         if (socket.user.role === 'admin') {
-          isMember = true; // Admins can join any group
+          // Admins can join any group IN THEIR ORGANIZATION
+          const { rowCount } = await pool.query(
+            'SELECT 1 FROM chat_groups WHERE id = $1 AND organization_id = $2',
+            [groupId, socket.user.organization_id]
+          );
+          isMember = rowCount > 0;
         } else if (socket.user.role === 'student') {
           // Verify group matches student's year and stream
           const { rowCount } = await pool.query(
