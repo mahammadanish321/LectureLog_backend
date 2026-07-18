@@ -144,6 +144,79 @@ export const getGroupStats = async (req, res) => {
   }
 };
 
+export const syncLegacyNodes = async (req, res) => {
+  try {
+    console.log('Starting sync of legacy schedules to Chat Nodes...');
+
+    // 1. Fetch all distinct subject, year, stream, org, and teacher combinations from schedule
+    const { rows: schedules } = await pool.query(`
+      SELECT DISTINCT 
+        s.subject_id, 
+        s.year, 
+        s.stream, 
+        s.organization_id, 
+        s.teacher_id,
+        sub.name as subject_name
+      FROM schedule s
+      JOIN subjects sub ON s.subject_id = sub.id
+      WHERE s.status = 'regular' OR s.status = 'custom'
+    `);
+
+    let groupsCreated = 0;
+    let teachersAdded = 0;
+
+    for (const sched of schedules) {
+      // 2. Check if a chat group already exists for this combination
+      const { rows: existingGroup } = await pool.query(
+        'SELECT id FROM chat_groups WHERE subject_id = $1 AND year = $2 AND stream = $3 AND organization_id = $4 LIMIT 1',
+        [sched.subject_id, sched.year, sched.stream, sched.organization_id]
+      );
+
+      let groupId;
+
+      if (existingGroup.length > 0) {
+        groupId = existingGroup[0].id;
+      } else {
+        // 3. Create the group if it doesn't exist
+        const groupName = `${sched.subject_name} - Yr${sched.year || '1'} (${sched.stream || 'CSE'})`;
+        const newGroup = await pool.query(
+          'INSERT INTO chat_groups (name, subject_id, year, stream, organization_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+          [groupName, sched.subject_id, sched.year || '1', sched.stream || 'CSE', sched.organization_id]
+        );
+        groupId = newGroup.rows[0].id;
+        groupsCreated++;
+        console.log(`Created Node: ${groupName}`);
+      }
+
+      // 4. Ensure the teacher is added to chat_group_members
+      if (sched.teacher_id) {
+        const { rowCount: isMember } = await pool.query(
+          'SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2',
+          [groupId, sched.teacher_id]
+        );
+
+        if (isMember === 0) {
+          await pool.query(
+            'INSERT INTO chat_group_members (group_id, teacher_id) VALUES ($1, $2)',
+            [groupId, sched.teacher_id]
+          );
+          teachersAdded++;
+        }
+      }
+    }
+
+    res.status(200).json({
+      message: 'Sync Complete!',
+      nodesCreated: groupsCreated,
+      teachersLinked: teachersAdded
+    });
+
+  } catch (error) {
+    console.error('Error during sync:', error);
+    res.status(500).json({ message: 'Error syncing legacy nodes', error: error.message });
+  }
+};
+
 // Handle file attachment upload
 export const uploadAttachment = async (req, res) => {
   try {
