@@ -6,8 +6,10 @@ import { getUserDetails } from "../utils/userLookup.js";
 
 dotenv.config();
 
+export let chatNamespace;
+
 export const initChatSockets = (io) => {
-  const chatNamespace = io.of("/chat");
+  chatNamespace = io.of("/chat");
 
   // Socket Authentication Middleware
   chatNamespace.use((socket, next) => {
@@ -126,7 +128,7 @@ export const initChatSockets = (io) => {
     // Handle incoming messages
     socket.on("send_message", async (data, callback) => {
       try {
-        const { groupId, content, attachmentUrls, replyTo } = data;
+        const { groupId, content, attachmentUrls, replyTo, isNoteFolder, noteFolderName } = data;
 
         if (!groupId || !content) {
           if (callback) callback({ error: "Missing groupId or content" });
@@ -140,7 +142,9 @@ export const initChatSockets = (io) => {
           senderType: socket.user.role,
           content,
           attachmentUrls: attachmentUrls || [],
-          replyTo: replyTo || null
+          replyTo: replyTo || null,
+          isNoteFolder: isNoteFolder || false,
+          noteFolderName: noteFolderName || null
         });
 
         await newMessage.save();
@@ -170,6 +174,49 @@ export const initChatSockets = (io) => {
       } catch (error) {
         console.error("[Chat Socket] Send message error:", error);
         if (callback) callback({ error: "Failed to send message" });
+      }
+    });
+
+    // Handle updating messages (Note Folders)
+    socket.on("update_message", async (data, callback) => {
+      try {
+        const { messageId, groupId, attachmentUrls } = data;
+        
+        const message = await Message.findById(messageId);
+        if (!message) {
+          if (callback) callback({ error: "Message not found" });
+          return;
+        }
+
+        if (message.senderId !== socket.user.id || message.senderType !== socket.user.role) {
+          if (callback) callback({ error: "Not authorized to edit this message" });
+          return;
+        }
+
+        message.attachmentUrls = attachmentUrls !== undefined ? attachmentUrls : message.attachmentUrls;
+        message.isEdited = true;
+        await message.save();
+
+        const updatedMessage = await Message.findById(messageId).populate('replyTo', 'content senderId senderType attachmentUrls isDeleted');
+        const senderDetails = await getUserDetails(socket.user.id, socket.user.role);
+        
+        const messageToBroadcast = {
+          ...updatedMessage.toObject(),
+          senderName: senderDetails.name,
+          senderAvatar: senderDetails.image_url
+        };
+
+        if (messageToBroadcast.replyTo && messageToBroadcast.replyTo.senderId) {
+          const replyDetails = await getUserDetails(messageToBroadcast.replyTo.senderId, messageToBroadcast.replyTo.senderType);
+          messageToBroadcast.replyTo.senderName = replyDetails.name;
+        }
+
+        chatNamespace.to(`group_${groupId}`).emit("message_updated", messageToBroadcast);
+
+        if (callback) callback({ success: true, message: messageToBroadcast });
+      } catch (error) {
+        console.error("[Chat Socket] Update message error:", error);
+        if (callback) callback({ error: "Failed to update message" });
       }
     });
 

@@ -244,3 +244,28 @@ export const uploadAttachment = async (req, res) => {
     res.status(500).json({ message: 'Failed to upload attachments' });
   }
 };
+
+export const editMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { attachmentUrls, isEdited } = req.body;
+    
+    // Validate if the message exists and user is sender
+    const message = await Message.findById(id);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+    
+    if (message.senderId !== req.user.id || message.senderType !== req.user.role) {
+      return res.status(403).json({ message: "Not authorized to edit this message" });
+    }
+
+    message.attachmentUrls = attachmentUrls !== undefined ? attachmentUrls : message.attachmentUrls;
+    message.isEdited = isEdited !== undefined ? isEdited : true;
+
+    await message.save();
+
+    res.json(message);
+  } catch (error) {
+    console.error('[Chat Controller] editMessage error:', error);
+    res.status(500).json({ message: 'Failed to edit message' });
+  }
+};

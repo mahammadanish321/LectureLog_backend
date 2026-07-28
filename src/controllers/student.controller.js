@@ -616,7 +616,7 @@ export const getMyProfile = async (req, res) => {
   const studentId = req.user.id;
   try {
     const { rows: students } = await pool.query(
-      'SELECT s.id, s.name, s.email, s.roll_number, s.college_id, s.year, s.stream, s.image_url, s.organization_id, o.name as organization FROM students s LEFT JOIN organizations o ON s.organization_id = o.id WHERE s.id = $1',
+      'SELECT s.id, s.name, s.email, s.roll_number, s.college_id, s.year, s.stream, s.image_url, s.organization_id, s.auto_bag_notes, o.name as organization FROM students s LEFT JOIN organizations o ON s.organization_id = o.id WHERE s.id = $1',
       [studentId]
     );
     if (students.length === 0) {

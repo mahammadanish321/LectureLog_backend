@@ -93,6 +93,7 @@ const initDb = async () => {
         otp_code VARCHAR(6),
         otp_expiry TIMESTAMPTZ,
         status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+        auto_bag_notes BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (roll_number, organization_id),
         UNIQUE (email, organization_id)
@@ -601,6 +602,128 @@ const initDb = async () => {
       
       CREATE INDEX IF NOT EXISTS idx_chat_messages_group_id ON chat_messages(group_id);
       CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
+
+      -- Storage System (Bag) Tables
+      CREATE TABLE IF NOT EXISTS bag_folders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL,
+        parent_id UUID REFERENCES bag_folders(id) ON DELETE CASCADE,
+        owner_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        owner_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        scope VARCHAR(20) NOT NULL DEFAULT 'personal' CHECK (scope IN ('personal', 'class', 'admin')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((owner_teacher_id IS NOT NULL AND owner_student_id IS NULL) OR (owner_teacher_id IS NULL AND owner_student_id IS NOT NULL))
+      );
+
+      CREATE TABLE IF NOT EXISTS bag_files (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        folder_id UUID REFERENCES bag_folders(id) ON DELETE CASCADE,
+        owner_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        owner_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        file_name VARCHAR(255) NOT NULL,
+        file_url VARCHAR(255) NOT NULL,
+        file_size INTEGER NOT NULL,
+        mime_type VARCHAR(100),
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((owner_teacher_id IS NOT NULL AND owner_student_id IS NULL) OR (owner_teacher_id IS NULL AND owner_student_id IS NOT NULL))
+      );
+
+      -- Writing Pad Tables
+      CREATE TABLE IF NOT EXISTS writing_pads (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        owner_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL DEFAULT 'Untitled Pad',
+        content_json JSONB DEFAULT '{}'::jsonb,
+        folder_id UUID REFERENCES bag_folders(id) ON DELETE SET NULL,
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        is_public BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((owner_teacher_id IS NOT NULL AND owner_student_id IS NULL) OR (owner_teacher_id IS NULL AND owner_student_id IS NOT NULL))
+      );
+
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE;
+      
+      -- Drop (Social Board) Tables
+      CREATE TABLE IF NOT EXISTS drops (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        author_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        author_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+        title VARCHAR(300) NOT NULL,
+        body TEXT,
+        score INTEGER NOT NULL DEFAULT 0,
+        comment_count INTEGER NOT NULL DEFAULT 0,
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((author_teacher_id IS NOT NULL AND author_student_id IS NULL) 
+            OR (author_teacher_id IS NULL AND author_student_id IS NOT NULL))
+      );
+
+      CREATE TABLE IF NOT EXISTS drop_votes (
+        id SERIAL PRIMARY KEY,
+        drop_id UUID NOT NULL REFERENCES drops(id) ON DELETE CASCADE,
+        voter_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        voter_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        vote SMALLINT NOT NULL CHECK (vote IN (-1, 1)),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (drop_id, voter_teacher_id),
+        UNIQUE (drop_id, voter_student_id),
+        CHECK ((voter_teacher_id IS NOT NULL AND voter_student_id IS NULL) 
+            OR (voter_teacher_id IS NULL AND voter_student_id IS NOT NULL))
+      );
+
+      CREATE TABLE IF NOT EXISTS drop_comments (
+        id SERIAL PRIMARY KEY,
+        drop_id UUID NOT NULL REFERENCES drops(id) ON DELETE CASCADE,
+        author_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        author_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        score INTEGER NOT NULL DEFAULT 0,
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK ((author_teacher_id IS NOT NULL AND author_student_id IS NULL) 
+            OR (author_teacher_id IS NULL AND author_student_id IS NOT NULL))
+      );
+
+      CREATE TABLE IF NOT EXISTS drop_comment_votes (
+        id SERIAL PRIMARY KEY,
+        comment_id INTEGER NOT NULL REFERENCES drop_comments(id) ON DELETE CASCADE,
+        voter_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        voter_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        vote SMALLINT NOT NULL CHECK (vote IN (-1, 1)),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (comment_id, voter_teacher_id),
+        UNIQUE (comment_id, voter_student_id),
+        CHECK ((voter_teacher_id IS NOT NULL AND voter_student_id IS NULL) 
+            OR (voter_teacher_id IS NULL AND voter_student_id IS NOT NULL))
+      );
+
+    `);
+
+    // AI Pad Document tables (Using JSONB for embeddings due to missing pgvector on Windows host)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pad_documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pad_id UUID NOT NULL REFERENCES writing_pads(id) ON DELETE CASCADE,
+        file_id UUID NOT NULL REFERENCES bag_files(id) ON DELETE CASCADE,
+        ai_summary TEXT,
+        status VARCHAR(50) DEFAULT 'processing' CHECK (status IN ('processing', 'completed', 'error')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(pad_id, file_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS document_chunks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pad_document_id UUID NOT NULL REFERENCES pad_documents(id) ON DELETE CASCADE,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding JSONB,
+        is_visual_desc BOOLEAN NOT NULL DEFAULT FALSE
+      );
     `);
 
     await client.query('COMMIT');

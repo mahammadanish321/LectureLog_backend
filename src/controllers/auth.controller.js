@@ -342,6 +342,21 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'No account found with this institutional email.' });
     }
 
+    // Never choose an organization based on a password match.  The client
+    // must establish organization context first when an email has multiple
+    // accounts for the selected role.
+    if (accounts.length > 1 && !organization_id) {
+      return res.status(400).json({
+        message: 'Select an organization before entering your password.',
+        requiresOrganizationSelection: true,
+        organizations: accounts.map(account => ({
+          id: account.organization_id,
+          name: account.organization_name,
+          slug: account.organization_slug
+        }))
+      });
+    }
+
     // Filter by password
     const validAccounts = [];
     for (const account of accounts) {
@@ -481,6 +496,16 @@ export const studentLogin = async (req, res) => {
       [email]
     );
     if (rows.length === 0) return res.status(401).json({ message: 'No student record found for this institutional email.' });
+
+    // An identical email can exist in more than one organization.  Do not
+    // infer the organization from whichever password happens to match.
+    if (rows.length > 1 && !organization_id) {
+      return res.status(400).json({
+        message: 'Select an organization before entering your password.',
+        requiresOrganizationSelection: true,
+        organizations: rows.map(user => ({ id: user.organization_id, name: user.organization_name, slug: user.organization_slug }))
+      });
+    }
     
     // Filter matching accounts by password
     const validUsers = [];

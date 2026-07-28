@@ -35,6 +35,25 @@ const messageSchema = new mongoose.Schema({
     }],
     default: []
   },
+  isNoteFolder: {
+    type: Boolean,
+    default: false,
+  },
+  scheduleId: {
+    type: Number,
+    default: null,
+  },
+  sessionId: {
+    type: Number,
+    default: null,
+  },
+  noteFolderName: {
+    type: String,
+  },
+  isEdited: {
+    type: Boolean,
+    default: false,
+  },
   isDeleted: {
     type: Boolean,
     default: false,

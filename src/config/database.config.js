@@ -82,6 +82,16 @@ export const testDatabaseConnection = async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_notifications_receiver ON notifications(receiver_id, receiver_role, is_read);
       CREATE INDEX IF NOT EXISTS idx_notifications_expiry ON notifications(expires_at) WHERE expires_at IS NOT NULL;
+      
+      CREATE TABLE IF NOT EXISTS pad_ai_chats (
+        id SERIAL PRIMARY KEY,
+        pad_id UUID NOT NULL,
+        role VARCHAR(10) NOT NULL CHECK (role IN ('user', 'bot')),
+        content TEXT NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'text',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_pad_ai_chats_pad_id ON pad_ai_chats(pad_id);
     `);
 
     // ── Admin Session & Push Notification Tracking Migration ──

@@ -18,10 +18,12 @@ const io = new Server(server, {
 
 import { initNotificationSockets } from "./services/notification.service.js";
 import { initChatSockets } from "./services/chat.service.js";
+import { initPadSockets } from "./services/pad.socket.service.js";
 
 app.set("io", io);
 initNotificationSockets(io);
 initChatSockets(io);
+initPadSockets(io);
 
 const PORT = Number(process.env.PORT) || 3000;
 

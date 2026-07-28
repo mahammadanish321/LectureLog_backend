@@ -25,6 +25,9 @@ import appVersionRoutes from "./routes/app-version.routes.js";
 import searchRoutes from "./routes/search.routes.js";
 import requestsRoutes from "./routes/requests.routes.js";
 import notesRoutes from "./routes/notes.routes.js";
+import bagRoutes from "./routes/bag.routes.js";
+import padRoutes from "./routes/pad.routes.js";
+import dropRoutes from "./routes/drop.routes.js";
 import { apiErrorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 // Setup directory paths for ES Modules
@@ -69,6 +72,9 @@ app.use("/api/app-version", appVersionRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/requests", requestsRoutes);
 app.use("/api/notes", notesRoutes);
+app.use("/api/bag", bagRoutes);
+app.use("/api/pads", padRoutes);
+app.use("/api/drops", dropRoutes);
 
 // --- ERROR HANDLING ---
 // These must be at the very end to catch unresolved routes or crashes
