@@ -107,6 +107,7 @@ export const uploadNote = async (req, res) => {
           
           const newMsg = new Message({
             groupId,
+            organizationId: orgId || req.user.organization_id,
             senderId: req.user.id,
             senderType: req.user.role,
             senderName: req.user.name,

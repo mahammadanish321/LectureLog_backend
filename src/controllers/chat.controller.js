@@ -94,7 +94,11 @@ export const getGroupMessages = async (req, res) => {
         }
       }
 
-    const messages = await Message.find({ groupId })
+    const userOrgId = req.user.organization_id;
+    const messages = await Message.find({
+      groupId,
+      organizationId: userOrgId
+    })
       .sort({ createdAt: -1 }) // Newest first
       .skip(skip)
       .limit(parseInt(limit))
@@ -279,6 +283,7 @@ export const shareDropToNode = async (req, res) => {
 
     const newMessage = new Message({
       groupId: Number(groupId),
+      organizationId: req.user.organization_id,
       senderId: Number(req.user.id || 0),
       senderType: req.user.role || 'admin',
       content: String(dropTitle || 'Shared Drop'),

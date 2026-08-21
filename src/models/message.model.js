@@ -6,6 +6,11 @@ const messageSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  organizationId: {
+    type: Number, // Reference to PostgreSQL organizations.id
+    required: false,
+    index: true,
+  },
   senderId: {
     type: Number, // Reference to PostgreSQL users.id or students.id
     required: true,

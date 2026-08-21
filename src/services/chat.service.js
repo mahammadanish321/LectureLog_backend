@@ -140,6 +140,7 @@ export const initChatSockets = (io) => {
         // Save to MongoDB
         const newMessage = new Message({
           groupId,
+          organizationId: socket.user.organization_id,
           senderId: socket.user.id,
           senderType: socket.user.role,
           content: content || sharedDropTitle || 'Shared Drop',
