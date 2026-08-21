@@ -75,6 +75,7 @@ const initDb = async () => {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_last_seen TIMESTAMPTZ;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_login_timestamp TIMESTAMPTZ;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token VARCHAR(255);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS firebase_uid VARCHAR(128);
     `);
 
     await client.query(`
@@ -127,6 +128,7 @@ const initDb = async () => {
 
     await client.query(`
       ALTER TABLE students ADD COLUMN IF NOT EXISTS is_face_verified BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS firebase_uid VARCHAR(128);
     `);
 
     await client.query(`
@@ -663,6 +665,8 @@ const initDb = async () => {
             OR (author_teacher_id IS NULL AND author_student_id IS NOT NULL))
       );
 
+      ALTER TABLE drops ADD COLUMN IF NOT EXISTS is_hidden_by_admin BOOLEAN NOT NULL DEFAULT FALSE;
+
       CREATE TABLE IF NOT EXISTS drop_votes (
         id SERIAL PRIMARY KEY,
         drop_id UUID NOT NULL REFERENCES drops(id) ON DELETE CASCADE,
@@ -681,6 +685,7 @@ const initDb = async () => {
         drop_id UUID NOT NULL REFERENCES drops(id) ON DELETE CASCADE,
         author_teacher_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
         author_student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+        parent_id INTEGER REFERENCES drop_comments(id) ON DELETE CASCADE,
         body TEXT NOT NULL,
         score INTEGER NOT NULL DEFAULT 0,
         is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
@@ -688,6 +693,15 @@ const initDb = async () => {
         CHECK ((author_teacher_id IS NOT NULL AND author_student_id IS NULL) 
             OR (author_teacher_id IS NULL AND author_student_id IS NOT NULL))
       );
+
+      ALTER TABLE drops ADD COLUMN IF NOT EXISTS media_url TEXT;
+      ALTER TABLE drops ADD COLUMN IF NOT EXISTS file_name VARCHAR(255);
+      ALTER TABLE drops ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb;
+
+      ALTER TABLE drop_comments ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES drop_comments(id) ON DELETE CASCADE;
+      ALTER TABLE drop_comments ADD COLUMN IF NOT EXISTS media_url TEXT;
+      ALTER TABLE drop_comments ADD COLUMN IF NOT EXISTS file_name VARCHAR(255);
+      ALTER TABLE drop_comments ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS drop_comment_votes (
         id SERIAL PRIMARY KEY,
@@ -701,7 +715,24 @@ const initDb = async () => {
         CHECK ((voter_teacher_id IS NOT NULL AND voter_student_id IS NULL) 
             OR (voter_teacher_id IS NULL AND voter_student_id IS NOT NULL))
       );
+    `);
 
+    await client.query(`
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS is_live_active BOOLEAN DEFAULT FALSE;
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS live_mode VARCHAR(20) DEFAULT 'edit';
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS target_audience_type VARCHAR(20) DEFAULT 'everyone';
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS target_year INTEGER;
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS target_stream VARCHAR(50);
+      ALTER TABLE writing_pads ADD COLUMN IF NOT EXISTS invited_user_ids JSONB DEFAULT '[]'::jsonb;
+
+      CREATE TABLE IF NOT EXISTS pad_collaborators (
+        id SERIAL PRIMARY KEY,
+        pad_id UUID NOT NULL REFERENCES writing_pads(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL,
+        user_role VARCHAR(20) NOT NULL,
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (pad_id, user_id, user_role)
+      );
     `);
 
     // AI Pad Document tables (Using JSONB for embeddings due to missing pgvector on Windows host)

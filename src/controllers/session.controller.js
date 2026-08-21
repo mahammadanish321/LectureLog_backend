@@ -612,8 +612,8 @@ export const getSessions = async (req, res) => {
      `;
     
 
-    if (year) { sessionParams.push(parseInt(year, 10)); sessionQuery += ` AND s.year = $${sessionParams.length}`; }
-    if (stream) { sessionParams.push(stream); sessionQuery += ` AND s.stream = $${sessionParams.length}`; }
+    if (year) { sessionParams.push(String(year)); sessionQuery += ` AND s.year::text = $${sessionParams.length}`; }
+    if (stream) { sessionParams.push(String(stream)); sessionQuery += ` AND s.stream ILIKE $${sessionParams.length}`; }
 
     const { rows: dbSessions } = await pool.query(sessionQuery, sessionParams);
 
@@ -677,8 +677,8 @@ export const getSessions = async (req, res) => {
         )
     `;
     const scheduleParams = [currentDay, organization_id, istDateStr];
-    if (year) { scheduleParams.push(year); scheduleQuery += ` AND s.year = $${scheduleParams.length}`; }
-    if (stream) { scheduleParams.push(stream); scheduleQuery += ` AND s.stream = $${scheduleParams.length}`; }
+    if (year) { scheduleParams.push(String(year)); scheduleQuery += ` AND s.year::text = $${scheduleParams.length}`; }
+    if (stream) { scheduleParams.push(String(stream)); scheduleQuery += ` AND s.stream ILIKE $${scheduleParams.length}`; }
 
     const { rows: todayRoutine } = await pool.query(scheduleQuery, scheduleParams);
 

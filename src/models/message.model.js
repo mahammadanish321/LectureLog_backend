@@ -50,6 +50,26 @@ const messageSchema = new mongoose.Schema({
   noteFolderName: {
     type: String,
   },
+  isSharedDrop: {
+    type: Boolean,
+    default: false,
+  },
+  sharedDropId: {
+    type: Number,
+    default: null,
+  },
+  sharedDropTitle: {
+    type: String,
+    default: null,
+  },
+  sharedDropBody: {
+    type: String,
+    default: null,
+  },
+  sharedDropAuthor: {
+    type: String,
+    default: null,
+  },
   isEdited: {
     type: Boolean,
     default: false,

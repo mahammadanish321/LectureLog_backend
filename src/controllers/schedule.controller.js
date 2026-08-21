@@ -255,7 +255,7 @@ export const getSchedules = async (req, res) => {
         LEFT JOIN classrooms c ON s.classroom_id = c.id
         WHERE s.valid_from <= $1::date + interval '6 days'
           AND (s.valid_until IS NULL OR $1::date < s.valid_until)
-          AND s.organization_id = $3
+          AND ($3::int IS NULL OR s.organization_id = $3::int)
           AND NOT EXISTS (
             SELECT 1 FROM timetable_week_entries twe
             WHERE twe.week_start = $1::date
@@ -300,13 +300,13 @@ export const getSchedules = async (req, res) => {
     const conditions = [];
     
     if (year) {
-      params.push(year);
-      conditions.push(`s.year = $${params.length}`);
+      params.push(String(year));
+      conditions.push(`s.year::text = $${params.length}`);
     }
     
     if (stream) {
-      params.push(stream);
-      conditions.push(`s.stream = $${params.length}`);
+      params.push(String(stream));
+      conditions.push(`s.stream ILIKE $${params.length}`);
     }
 
     const orgId = req.user?.organization_id;
@@ -356,12 +356,12 @@ export const getSchedules = async (req, res) => {
     `;
     const historyParams = [targetWeekStartStr];
     if (year) {
-      historyParams.push(year);
-      historyQuery += ` AND twe.year = $${historyParams.length}`;
+      historyParams.push(String(year));
+      historyQuery += ` AND twe.year::text = $${historyParams.length}`;
     }
     if (stream) {
-      historyParams.push(stream);
-      historyQuery += ` AND twe.stream = $${historyParams.length}`;
+      historyParams.push(String(stream));
+      historyQuery += ` AND twe.stream ILIKE $${historyParams.length}`;
     }
     if (orgId) {
       historyParams.push(orgId);

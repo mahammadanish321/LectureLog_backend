@@ -6,7 +6,10 @@ import {
   getPadById, 
   updatePad, 
   deletePad,
-  getSharedPad 
+  getSharedPad,
+  getLiveInvitations,
+  getCollaborationCandidates,
+  registerCollaborator
 } from '../controllers/pad.controller.js';
 
 import { 
@@ -23,6 +26,10 @@ const router = express.Router();
 router.get('/shared/:id', getSharedPad);
 
 router.use(authenticateToken);
+
+router.post('/shared/:id/join', registerCollaborator);
+router.get('/live-invitations', getLiveInvitations);
+router.get('/candidates/list', getCollaborationCandidates);
 
 router.post('/', createPad);
 router.get('/user/all', getAllPads);

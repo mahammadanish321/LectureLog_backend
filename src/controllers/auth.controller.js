@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { Resend } from 'resend';
 import { invalidateSessionCache } from '../middleware/auth.middleware.js';
+import { verifyFirebaseIdToken } from '../config/firebase.config.js';
 
 dotenv.config();
 
@@ -42,18 +43,20 @@ export const checkEmail = async (req, res) => {
 
     let accounts = [];
 
+    const cleanEmail = email.trim().toLowerCase();
+
     if (role === 'student') {
       // Check students table
       const { rows: students } = await pool.query(
-        'SELECT s.organization_id FROM students s WHERE s.email = $1',
-        [email]
+        'SELECT s.organization_id FROM students s WHERE LOWER(s.email) = $1',
+        [cleanEmail]
       );
       accounts = students;
     } else {
       // Check users table for teacher or admin
       const { rows: users } = await pool.query(
-        'SELECT u.organization_id FROM users u WHERE u.email = $1 AND u.role = $2',
-        [email, role]
+        'SELECT u.organization_id FROM users u WHERE LOWER(u.email) = $1 AND u.role = $2',
+        [cleanEmail, role]
       );
       accounts = users;
     }
@@ -706,5 +709,245 @@ export const forgotPasswordFinalize = async (req, res) => {
   } catch (err) {
     console.error('[AUTH] Forgot password finalize error:', err.message);
     res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * FIREBASE LOGIN: Authenticate existing student, teacher, or admin via Google Firebase ID Token.
+ * If user has multiple accounts under the same role across multiple orgs, returns list of orgs.
+ */
+export const firebaseLogin = async (req, res) => {
+  const { idToken, role, organization_id, device_id, login_platform } = req.body;
+
+  try {
+    if (!idToken) {
+      return res.status(400).json({ message: 'Firebase ID Token is required.' });
+    }
+
+    const decoded = await verifyFirebaseIdToken(idToken);
+    const googleEmail = decoded.email?.toLowerCase().trim();
+    const firebaseUid = decoded.uid;
+
+    if (!googleEmail) {
+      return res.status(400).json({ message: 'Unable to retrieve verified email from Google account.' });
+    }
+
+    const userRole = role || 'teacher';
+    let accounts = [];
+
+    if (userRole === 'student') {
+      const { rows: students } = await pool.query(
+        'SELECT s.*, o.name as organization_name, o.slug as organization_slug FROM students s LEFT JOIN organizations o ON s.organization_id = o.id WHERE LOWER(s.email) = $1',
+        [googleEmail]
+      );
+      accounts = students;
+    } else {
+      const { rows: users } = await pool.query(
+        'SELECT u.*, o.name as organization_name, o.slug as organization_slug FROM users u LEFT JOIN organizations o ON u.organization_id = o.id WHERE LOWER(u.email) = $1 AND u.role = $2',
+        [googleEmail, userRole]
+      );
+      accounts = users;
+    }
+
+    if (accounts.length === 0) {
+      return res.status(404).json({
+        message: `You are not registered as a ${userRole} in any institution with this Google email (${googleEmail}). Please contact your college administrator or activate your account first.`
+      });
+    }
+
+    // Multiple orgs found & no organization_id selected yet
+    if (accounts.length > 1 && !organization_id) {
+      return res.json({
+        status: 'select_organization',
+        message: 'Select an organization to proceed.',
+        organizations: accounts.map(a => ({
+          id: a.organization_id,
+          name: a.organization_name,
+          slug: a.organization_slug
+        }))
+      });
+    }
+
+    // Select the target account
+    let targetAccount = null;
+    if (organization_id) {
+      targetAccount = accounts.find(a => a.organization_id === parseInt(organization_id));
+      if (!targetAccount) {
+        return res.status(404).json({ message: `No ${userRole} account found for this Google email in the selected institution.` });
+      }
+    } else {
+      targetAccount = accounts[0];
+    }
+
+    // Link Firebase UID and ensure account is marked active since email is verified by Google
+    if (!targetAccount.is_active || targetAccount.firebase_uid !== firebaseUid) {
+      if (userRole === 'student') {
+        await pool.query(
+          'UPDATE students SET is_active = true, firebase_uid = $1 WHERE id = $2',
+          [firebaseUid, targetAccount.id]
+        );
+      } else {
+        await pool.query(
+          'UPDATE users SET is_active = true, firebase_uid = $1 WHERE id = $2',
+          [firebaseUid, targetAccount.id]
+        );
+      }
+    }
+
+    let sessionToken = null;
+    if (userRole === 'admin') {
+      sessionToken = crypto.randomBytes(32).toString('hex');
+      const deviceId = device_id || req.headers['user-agent']?.substring(0, 200) || 'unknown';
+      const platform = login_platform || 'desktop';
+
+      await pool.query(
+        `UPDATE users SET 
+          admin_session_token = $1, 
+          admin_device_id = $2, 
+          admin_login_platform = $3, 
+          admin_last_seen = NOW(), 
+          admin_login_timestamp = NOW() 
+        WHERE id = $4`,
+        [sessionToken, deviceId, platform, targetAccount.id]
+      );
+      invalidateSessionCache(targetAccount.id);
+    }
+
+    // Sign Merge JWT
+    const token = jwt.sign(
+      {
+        id: targetAccount.id,
+        email: targetAccount.email,
+        role: userRole,
+        organization_id: targetAccount.organization_id,
+        ...(sessionToken ? { session_token: sessionToken } : {})
+      },
+      process.env.JWT_SECRET || 'secret'
+    );
+
+    console.log(`[AUTH] Firebase Google Login: ${googleEmail} (${userRole}) in org ${targetAccount.organization_name || targetAccount.organization_id}`);
+
+    res.json({
+      token,
+      user: {
+        id: targetAccount.id,
+        name: targetAccount.name,
+        email: targetAccount.email,
+        role: userRole,
+        college_id: targetAccount.college_id,
+        organization: targetAccount.organization_name,
+        organization_id: targetAccount.organization_id,
+        organization_slug: targetAccount.organization_slug,
+        year: targetAccount.year,
+        stream: targetAccount.stream,
+        image_url: targetAccount.image_url
+      }
+    });
+  } catch (err) {
+    console.error('[AUTH] Firebase Login error:', err.message);
+    res.status(500).json({ message: err.message?.includes('Firebase') ? err.message : 'Unable to complete Google authentication. Please try again.' });
+  }
+};
+
+/**
+ * FIREBASE ACCOUNT ACTIVATION (CLAIM):
+ * Pre-checks that the Google email belongs to the selected organization + role.
+ * Completely SKIPS the OTP step because Google verified email ownership.
+ * Activates account, optionally sets a password, and signs in immediately.
+ */
+export const firebaseClaim = async (req, res) => {
+  const { idToken, role, organization_id, password } = req.body;
+
+  try {
+    if (!idToken) {
+      return res.status(400).json({ message: 'Firebase ID Token is required.' });
+    }
+    if (!organization_id) {
+      return res.status(400).json({ message: 'Please select your institution first.' });
+    }
+
+    const decoded = await verifyFirebaseIdToken(idToken);
+    const googleEmail = decoded.email?.toLowerCase().trim();
+    const firebaseUid = decoded.uid;
+
+    if (!googleEmail) {
+      return res.status(400).json({ message: 'Unable to retrieve verified email from Google account.' });
+    }
+
+    const userRole = role || 'teacher';
+    let targetAccount = null;
+
+    if (userRole === 'student') {
+      const { rows: students } = await pool.query(
+        'SELECT s.*, o.name as organization_name, o.slug as organization_slug FROM students s LEFT JOIN organizations o ON s.organization_id = o.id WHERE LOWER(s.email) = $1 AND s.organization_id = $2',
+        [googleEmail, organization_id]
+      );
+      if (students.length > 0) targetAccount = students[0];
+    } else {
+      const { rows: users } = await pool.query(
+        'SELECT u.*, o.name as organization_name, o.slug as organization_slug FROM users u LEFT JOIN organizations o ON u.organization_id = o.id WHERE LOWER(u.email) = $1 AND u.organization_id = $2 AND u.role = $3',
+        [googleEmail, organization_id, userRole]
+      );
+      if (users.length > 0) targetAccount = users[0];
+    }
+
+    if (!targetAccount) {
+      return res.status(404).json({
+        message: `No pending ${userRole} record found for ${googleEmail} in the selected institution. You are not registered for this role or institution. Please contact your college administrator.`
+      });
+    }
+
+    // Hash optional password if provided
+    let hashedPassword = targetAccount.password;
+    if (password) {
+      hashedPassword = await bcrypt.hash(password, 10);
+    }
+
+    // Update account to active, record firebase_uid, clear any pending OTPs
+    if (userRole === 'student') {
+      await pool.query(
+        'UPDATE students SET is_active = true, firebase_uid = $1, otp_code = NULL, password = COALESCE($2, password) WHERE id = $3',
+        [firebaseUid, hashedPassword, targetAccount.id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE users SET is_active = true, firebase_uid = $1, otp_code = NULL, password = COALESCE($2, password) WHERE id = $3',
+        [firebaseUid, hashedPassword, targetAccount.id]
+      );
+    }
+
+    // Sign Merge JWT for instant post-activation session
+    const token = jwt.sign(
+      {
+        id: targetAccount.id,
+        email: targetAccount.email,
+        role: userRole,
+        organization_id: targetAccount.organization_id
+      },
+      process.env.JWT_SECRET || 'secret'
+    );
+
+    console.log(`[AUTH] Account Activated via Google: ${googleEmail} (${userRole}) in org ${targetAccount.organization_name || organization_id}`);
+
+    res.json({
+      message: 'Account activated successfully with Google!',
+      token,
+      user: {
+        id: targetAccount.id,
+        name: targetAccount.name,
+        email: targetAccount.email,
+        role: userRole,
+        college_id: targetAccount.college_id,
+        organization: targetAccount.organization_name,
+        organization_id: targetAccount.organization_id,
+        organization_slug: targetAccount.organization_slug,
+        year: targetAccount.year,
+        stream: targetAccount.stream,
+        image_url: targetAccount.image_url
+      }
+    });
+  } catch (err) {
+    console.error('[AUTH] Firebase Claim error:', err.message);
+    res.status(500).json({ message: err.message?.includes('Firebase') ? err.message : 'Failed to activate account with Google. Please try again.' });
   }
 };

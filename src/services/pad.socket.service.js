@@ -1,3 +1,5 @@
+import pool from '../config/database.config.js';
+
 export let padNamespace;
 
 export const initPadSockets = (io) => {
@@ -14,7 +16,7 @@ export const initPadSockets = (io) => {
     });
 
     // Handle Excalidraw element updates
-    socket.on('pad_update', (data) => {
+    socket.on('pad_update', async (data) => {
       const { padId, elements, appState } = data;
       // Broadcast to everyone else in the pad
       socket.to(`pad_${padId}`).emit('pad_update', {
@@ -22,6 +24,18 @@ export const initPadSockets = (io) => {
         appState,
         socketId: socket.id
       });
+
+      // Persist to PostgreSQL database
+      if (padId && Array.isArray(elements)) {
+        try {
+          await pool.query(
+            `UPDATE writing_pads SET content_json = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify({ elements, appState }), padId]
+          );
+        } catch (e) {
+          console.error('Failed to save socket pad update to DB:', e);
+        }
+      }
     });
 
     // Handle Excalidraw pointer/cursor updates

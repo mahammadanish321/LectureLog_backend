@@ -1,5 +1,21 @@
-﻿import express from "express";
-import { checkEmail, adminLogin, login, signup, studentLogin, claimInit, claimVerify, claimFinalize, adminSignupInit, adminSignupVerify, forgotPasswordInit, forgotPasswordVerify, forgotPasswordFinalize } from "../controllers/auth.controller.js";
+import express from "express";
+import { 
+  checkEmail, 
+  adminLogin, 
+  login, 
+  signup, 
+  studentLogin, 
+  claimInit, 
+  claimVerify, 
+  claimFinalize, 
+  adminSignupInit, 
+  adminSignupVerify, 
+  forgotPasswordInit, 
+  forgotPasswordVerify, 
+  forgotPasswordFinalize,
+  firebaseLogin,
+  firebaseClaim
+} from "../controllers/auth.controller.js";
 
 const router = express.Router();
 
@@ -9,6 +25,10 @@ router.get("/check-email", checkEmail);
 router.post("/login", login);
 router.post("/admin/login", adminLogin);
 router.post("/student/login", studentLogin);
+
+// Firebase Google Authentication & Activation
+router.post("/firebase-login", firebaseLogin);
+router.post("/firebase-claim", firebaseClaim);
 
 // Admin Dedicated Signup
 router.post("/admin-signup-init", adminSignupInit);
@@ -25,3 +45,4 @@ router.post("/forgot-password-verify", forgotPasswordVerify);
 router.post("/forgot-password-finalize", forgotPasswordFinalize);
 
 export default router;
+

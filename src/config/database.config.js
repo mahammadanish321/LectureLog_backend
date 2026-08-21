@@ -54,8 +54,14 @@ export const testDatabaseConnection = async () => {
 
     // Connect to MongoDB
     if (process.env.MONGODB_URI) {
-      await mongoose.connect(process.env.MONGODB_URI);
-      console.log("✅ [Database] Connected to MongoDB.");
+      try {
+        await mongoose.connect(process.env.MONGODB_URI, {
+          serverSelectionTimeoutMS: 5000,
+        });
+        console.log("✅ [Database] Connected to MongoDB.");
+      } catch (mongoErr) {
+        console.warn("⚠️ [Database] MongoDB connection failed (running on PostgreSQL):", mongoErr.message);
+      }
     } else {
       console.warn("⚠️ [Database] MONGODB_URI not found. MongoDB features will be disabled.");
     }

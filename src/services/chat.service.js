@@ -128,9 +128,9 @@ export const initChatSockets = (io) => {
     // Handle incoming messages
     socket.on("send_message", async (data, callback) => {
       try {
-        const { groupId, content, attachmentUrls, replyTo, isNoteFolder, noteFolderName } = data;
+        const { groupId, content, attachmentUrls, replyTo, isNoteFolder, noteFolderName, isSharedDrop, sharedDropId, sharedDropTitle, sharedDropBody, sharedDropAuthor } = data;
 
-        if (!groupId || !content) {
+        if (!groupId || (!content && !isSharedDrop)) {
           if (callback) callback({ error: "Missing groupId or content" });
           return;
         }
@@ -140,11 +140,16 @@ export const initChatSockets = (io) => {
           groupId,
           senderId: socket.user.id,
           senderType: socket.user.role,
-          content,
+          content: content || sharedDropTitle || 'Shared Drop',
           attachmentUrls: attachmentUrls || [],
           replyTo: replyTo || null,
           isNoteFolder: isNoteFolder || false,
-          noteFolderName: noteFolderName || null
+          noteFolderName: noteFolderName || null,
+          isSharedDrop: isSharedDrop || false,
+          sharedDropId: sharedDropId || null,
+          sharedDropTitle: sharedDropTitle || null,
+          sharedDropBody: sharedDropBody || null,
+          sharedDropAuthor: sharedDropAuthor || null
         });
 
         await newMessage.save();

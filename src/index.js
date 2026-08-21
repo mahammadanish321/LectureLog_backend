@@ -41,8 +41,8 @@ const startServer = async () => {
       console.log('AI Spawning is disabled (Production Mode).');
     }
 
-    server.listen(PORT, () => {
-      console.log(`Merge backend running on port ${PORT}`);
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`Merge backend running on port ${PORT} (0.0.0.0)`);
     });
   } catch (error) {
     console.error("Failed to start backend:", error);

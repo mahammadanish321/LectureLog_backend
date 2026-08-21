@@ -10,6 +10,7 @@ router.post('/', authenticateToken, authorizeRole('teacher', 'admin'), upload.an
 router.get('/public', getStudents);
 router.get('/', authenticateToken, getStudents);
 router.get('/me', authenticateToken, getMyProfile);
+router.get('/profile', authenticateToken, getMyProfile);
 router.get('/my-attendance', authenticateToken, getMyAttendance);
 router.get('/my-stats', authenticateToken, getMyStats);
 router.patch('/me/auto-bag-notes', authenticateToken, async (req, res) => {

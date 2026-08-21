@@ -16,6 +16,7 @@ const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
 router.get('/me', authenticateToken, getMyProfile);
+router.get('/profile', authenticateToken, getMyProfile);
 router.post('/', authenticateToken, upload.any(), registerTeacher);
 router.put('/:id', authenticateToken, upload.any(), updateTeacher);
 router.get('/', authenticateToken, getTeachers);

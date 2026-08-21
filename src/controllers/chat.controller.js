@@ -269,3 +269,31 @@ export const editMessage = async (req, res) => {
     res.status(500).json({ message: 'Failed to edit message' });
   }
 };
+
+export const shareDropToNode = async (req, res) => {
+  try {
+    const { groupId, dropId, dropTitle, dropBody, dropAuthor } = req.body;
+    if (!groupId || !dropId) {
+      return res.status(400).json({ message: "Missing groupId or dropId" });
+    }
+
+    const newMessage = new Message({
+      groupId: Number(groupId),
+      senderId: Number(req.user.id || 0),
+      senderType: req.user.role || 'admin',
+      content: String(dropTitle || 'Shared Drop'),
+      isSharedDrop: true,
+      sharedDropId: Number(dropId),
+      sharedDropTitle: String(dropTitle || 'Shared Drop'),
+      sharedDropBody: String(dropBody || ''),
+      sharedDropAuthor: String(dropAuthor || 'Anonymous')
+    });
+
+    await newMessage.save();
+
+    res.status(201).json({ message: "Drop shared successfully to node", data: newMessage });
+  } catch (error) {
+    console.error('[Chat Controller] shareDropToNode error:', error);
+    res.status(500).json({ message: 'Failed to share drop to node', error: error.message });
+  }
+};
