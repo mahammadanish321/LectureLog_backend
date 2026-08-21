@@ -53,10 +53,12 @@ export const initChatSockets = (io) => {
           );
           isMember = rowCount > 0;
         } else {
-          // Verify teacher is explicitly in group_members
+          // Verify teacher is explicitly in group_members and within their organization
           const { rowCount } = await pool.query(
-            `SELECT 1 FROM chat_group_members WHERE group_id = $1 AND teacher_id = $2`,
-            [groupId, socket.user.id]
+            `SELECT 1 FROM chat_group_members cgm
+             JOIN chat_groups cg ON cgm.group_id = cg.id
+             WHERE cgm.group_id = $1 AND cgm.teacher_id = $2 AND cg.organization_id = $3`,
+            [groupId, socket.user.id, socket.user.organization_id]
           );
           isMember = rowCount > 0;
         }
